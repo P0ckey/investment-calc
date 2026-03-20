@@ -1,9 +1,41 @@
 import streamlit as st
 import pandas as pd
 import plotly.express as px
+import yfinance as yf
 from datetime import datetime
 
 SP500_PROJECTED_ANNUAL_RETURN = 10.0
+DOW_PROJECTED_ANNUAL_RETURN = 8.0
+
+
+@st.cache_data(ttl=60 * 60 * 12)
+def get_historical_cagr(symbol, lookback_years):
+    end = pd.Timestamp.today().normalize()
+    start = end - pd.DateOffset(years=lookback_years + 1)
+    data = yf.download(
+        symbol,
+        start=start,
+        end=end,
+        progress=False,
+        auto_adjust=True,
+        interval="1mo",
+    )
+
+    if data.empty or "Close" not in data:
+        raise ValueError("No historical price data returned.")
+
+    closes = data["Close"].dropna()
+    if len(closes) < 2:
+        raise ValueError("Not enough historical points to compute CAGR.")
+
+    first_price = float(closes.iloc[0])
+    last_price = float(closes.iloc[-1])
+    observed_years = (closes.index[-1] - closes.index[0]).days / 365.25
+    if observed_years <= 0 or first_price <= 0:
+        raise ValueError("Invalid historical price series for CAGR.")
+
+    cagr_pct = ((last_price / first_price) ** (1 / observed_years) - 1) * 100
+    return cagr_pct, observed_years, closes.index[0].date(), closes.index[-1].date()
 
 
 def initialize_session_state():
@@ -158,10 +190,15 @@ def main():
         st.header("Inputs")
         rate_mode = st.radio(
             "Annual return source",
-            ["Custom percentage", "S&P 500 projection"],
+            [
+                "Custom percentage",
+                "S&P 500 historical projection",
+                "Dow Jones historical projection",
+            ],
             index=0,
             key="rate_mode",
         )
+        rate_detail_text = rate_mode
         if rate_mode == "Custom percentage":
             annual_rate = st.number_input(
                 "Fixed annual interest rate (%)",
@@ -171,9 +208,52 @@ def main():
                 step=0.1,
                 key="annual_rate",
             )
-        else:
-            annual_rate = SP500_PROJECTED_ANNUAL_RETURN
-            st.info(f"Using S&P 500 projected annual return: {annual_rate:.1f}%")
+        elif rate_mode == "S&P 500 historical projection":
+            lookback_years = st.slider(
+                "Historical lookback (years)",
+                min_value=5,
+                max_value=50,
+                value=20,
+                step=1,
+                key="sp500_lookback_years",
+            )
+            try:
+                annual_rate, observed_years, start_date, end_date = get_historical_cagr("^GSPC", lookback_years)
+                rate_detail_text = (
+                    f"S&P 500 CAGR over {observed_years:.1f}y "
+                    f"({start_date} to {end_date})"
+                )
+                st.success(f"Using S&P 500 historical CAGR: {annual_rate:.2f}%")
+            except Exception:
+                annual_rate = SP500_PROJECTED_ANNUAL_RETURN
+                rate_detail_text = "S&P 500 fallback projection"
+                st.warning(
+                    f"Could not fetch S&P 500 history. Using fallback rate: {annual_rate:.1f}%"
+                )
+        elif rate_mode == "Dow Jones historical projection":
+            lookback_years = st.slider(
+                "Historical lookback (years)",
+                min_value=5,
+                max_value=50,
+                value=20,
+                step=1,
+                key="dow_lookback_years",
+            )
+            try:
+                annual_rate, observed_years, start_date, end_date = get_historical_cagr("^DJI", lookback_years)
+                rate_detail_text = (
+                    f"Dow Jones CAGR over {observed_years:.1f}y "
+                    f"({start_date} to {end_date})"
+                )
+                st.success(f"Using Dow Jones historical CAGR: {annual_rate:.2f}%")
+            except Exception:
+                annual_rate = DOW_PROJECTED_ANNUAL_RETURN
+                rate_detail_text = "Dow Jones fallback projection"
+                st.warning(
+                    f"Could not fetch Dow Jones history. Using fallback rate: {annual_rate:.1f}%"
+                )
+
+        st.caption("Historical index projection uses price history from Yahoo Finance.")
 
         initial_investment = st.number_input(
             "Initial investment amount ($)",
@@ -295,7 +375,7 @@ def main():
     col2.metric("Total contributed", format_money(final_contributions))
     col3.metric("Total interest earned", format_money(final_interest))
     col4.metric("Overall ROI", f"{roi_pct:.2f}%")
-    st.caption(f"Annual return used in simulation: {annual_rate:.2f}% ({rate_mode})")
+    st.caption(f"Annual return used in simulation: {annual_rate:.2f}% ({rate_detail_text})")
 
     st.subheader("Year index guide")
     st.caption("Use this mapping when entering start/end years for contributions.")
