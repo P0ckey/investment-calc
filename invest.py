@@ -3,6 +3,8 @@ import pandas as pd
 import plotly.express as px
 from datetime import datetime
 
+SP500_PROJECTED_ANNUAL_RETURN = 10.0
+
 
 def initialize_session_state():
     if "contributions" not in st.session_state:
@@ -154,14 +156,25 @@ def main():
 
     with st.sidebar:
         st.header("Inputs")
-        annual_rate = st.number_input(
-            "Fixed annual interest rate (%)",
-            min_value=0.0,
-            max_value=100.0,
-            value=5.0,
-            step=0.1,
-            key="annual_rate",
+        rate_mode = st.radio(
+            "Annual return source",
+            ["Custom percentage", "S&P 500 projection"],
+            index=0,
+            key="rate_mode",
         )
+        if rate_mode == "Custom percentage":
+            annual_rate = st.number_input(
+                "Fixed annual interest rate (%)",
+                min_value=0.0,
+                max_value=100.0,
+                value=5.0,
+                step=0.1,
+                key="annual_rate",
+            )
+        else:
+            annual_rate = SP500_PROJECTED_ANNUAL_RETURN
+            st.info(f"Using S&P 500 projected annual return: {annual_rate:.1f}%")
+
         initial_investment = st.number_input(
             "Initial investment amount ($)",
             min_value=0.0,
@@ -282,6 +295,7 @@ def main():
     col2.metric("Total contributed", format_money(final_contributions))
     col3.metric("Total interest earned", format_money(final_interest))
     col4.metric("Overall ROI", f"{roi_pct:.2f}%")
+    st.caption(f"Annual return used in simulation: {annual_rate:.2f}% ({rate_mode})")
 
     st.subheader("Year index guide")
     st.caption("Use this mapping when entering start/end years for contributions.")
